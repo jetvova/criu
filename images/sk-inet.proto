@@ -24,7 +24,7 @@ message ip_opts_entry {
 message inet_sk_entry {
 	/*
 	 * We have two IDs here -- id and ino. The first one
-	 * is used when restoring socket behind a file descriprot.
+	 * is used when restoring socket behind a file descriptor.
 	 * The fdinfo image's id is it. The second one is used
 	 * in sk-inet.c internally, in particular we identify
 	 * a TCP stream to restore into this socket using the
@@ -54,4 +54,6 @@ message inet_sk_entry {
 	optional string			ifname		= 17;
 	optional uint32			ns_id		= 18;
 	optional sk_shutdown		shutdown	= 19;
+	// Proof of concept UDP socket state stored here. Move it to separate storage like with TCP.
+    optional bool			udp_cork	= 20; // TODO: Add buffer to store queue contents.
 }

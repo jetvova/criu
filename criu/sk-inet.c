@@ -141,8 +141,7 @@ static int can_dump_inet_sk(const struct inet_sk_desc *sk)
 	if (sk->type == SOCK_DGRAM) {
 		if (sk->wqlen != 0) {
 			if (sk->cork) {
-				pr_err("Can't dump corked dgram socket %x\n", sk->sd.ino);
-				return 0;
+				pr_warn("Dumping corked dgram socket %x wqlen: %d\n", sk->sd.ino, sk->wqlen);
 			} else {
 				pr_warn("Write queue of the %x socket isn't empty\n", sk->sd.ino);
 			}
@@ -483,12 +482,9 @@ static int do_dump_one_inet_fd(int lfd, u32 id, const struct fd_parms *p, int fa
 				return -1;
 			if (aux) {
 				sk->cork = true;
-				/*
-				 * FIXME: it is possible to dump a corked socket with
-				 * the empty send queue.
-				 */
-				pr_err("Can't dump corked dgram socket %x\n", sk->sd.ino);
-				goto err;
+                ie.has_udp_cork = true;
+                ie.udp_cork = true;
+				pr_warn("Dumping corked dgram socket %x, %d\n", sk->sd.ino, ie.udp_cork);
 			}
 			break;
 		}
@@ -877,6 +873,7 @@ static int open_inet_sk(struct file_desc *d, int *new_fd)
 	if (restore_opt(sk, SOL_SOCKET, SO_REUSEPORT, &yes))
 		goto err;
 
+    // Restoring state of sockets by protocol type
 	if (tcp_connection(ie)) {
 		if (!opts.tcp_established_ok && !opts.tcp_close) {
 			pr_err("Connected TCP socket in image\n");
@@ -891,7 +888,14 @@ static int open_inet_sk(struct file_desc *d, int *new_fd)
 		mutex_unlock(&ii->port->reuseaddr_lock);
 
 		goto done;
-	}
+	} else if (ie->proto == IPPROTO_UDP || ie->proto == IPPROTO_UDPLITE) {
+		mutex_lock(&ii->port->reuseaddr_lock);
+		if (restore_one_udp(sk, ii)) {
+			mutex_unlock(&ii->port->reuseaddr_lock);
+			goto err;
+		}
+		mutex_unlock(&ii->port->reuseaddr_lock);
+    }
 
 	if (ie->src_port) {
 		if (inet_bind(sk, ii))
@@ -951,6 +955,20 @@ done:
 err:
 	close(sk);
 	return -1;
+}
+
+int restore_one_udp(int fd, struct inet_sk_info *ii)
+{
+	int yes = 1;
+	pr_info("Restoring UDP socket fd: %d\n", fd);
+    
+    if (ii->ie->has_udp_cork && ii->ie->udp_cork) {
+        pr_info("UDP socket had cork\n");
+        if (restore_opt(fd, IPPROTO_UDP, UDP_CORK, &yes))
+            return -1;
+        // TODO: Restore checkpointed queue
+    }
+	return 0;
 }
 
 int restore_sockaddr(union libsoccr_addr *sa, int family, u32 pb_port, u32 *pb_addr, u32 ifindex)
